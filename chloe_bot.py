@@ -16,9 +16,9 @@ from telegram.ext import (
 from openai import OpenAI
 from gtts import gTTS
 
-# =======================
+# ======================
 # CONFIG
-# =======================
+# ======================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -26,11 +26,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 MEMORY_FILE = "memory.json"
-VOICE_PROBABILITY = 0.5  # 50% vocal / 50% texte
 
-# =======================
+# ======================
 # MÉMOIRE
-# =======================
+# ======================
 
 def load_memory():
     if not os.path.exists(MEMORY_FILE):
@@ -45,58 +44,91 @@ def save_memory(mem):
 memory = load_memory()
 
 def get_user_memory(user_id):
-    if str(user_id) not in memory:
-        memory[str(user_id)] = {
+    uid = str(user_id)
+    if uid not in memory:
+        memory[uid] = {
             "profile": {
-                "name": None,
-                "preferences": [],
-                "facts": []
+                "facts": [],
             },
+            "emotion": "neutre",
+            "mode": "cool",
             "history": []
         }
-    return memory[str(user_id)]
+    return memory[uid]
 
-def extract_memory_candidate(text):
-    triggers = [
-        "j'aime", "je déteste", "je préfère",
-        "je m'appelle", "mon prénom",
-        "je travaille", "mon travail",
-        "ma passion", "j'adore"
-    ]
-    for t in triggers:
-        if t in text.lower():
-            return text
-    return None
+# ======================
+# ANALYSE ÉMOTION
+# ======================
 
-# =======================
+def detect_emotion(text):
+    t = text.lower()
+    if any(x in t for x in ["merci", "cool", "génial", "j'adore"]):
+        return "positif"
+    if any(x in t for x in ["ras le bol", "marre", "nul", "fatigué"]):
+        return "négatif"
+    if any(x in t for x in ["?", "pourquoi", "comment"]):
+        return "curieux"
+    return "neutre"
+
+# ======================
+# MODE AUTO
+# ======================
+
+def choose_mode(emotion):
+    if emotion == "positif":
+        return "taquin"
+    if emotion == "négatif":
+        return "doux"
+    if emotion == "curieux":
+        return "sérieux"
+    return "cool"
+
+# ======================
+# VOIX
+# ======================
+
+def voice_probability(emotion):
+    if emotion == "positif":
+        return 0.7
+    if emotion == "négatif":
+        return 0.3
+    return 0.5
+
+# ======================
 # OPENAI
-# =======================
+# ======================
 
 async def ask_openai(user_id, user_text):
-    user_mem = get_user_memory(user_id)
+    mem = get_user_memory(user_id)
 
-    # Historique court (max 10)
-    user_mem["history"].append({"role": "user", "content": user_text})
-    user_mem["history"] = user_mem["history"][-10:]
+    mem["history"].append({"role": "user", "content": user_text})
+    mem["history"] = mem["history"][-12:]
 
-    # Mémoire longue durée
     memory_context = ""
-    if user_mem["profile"]["facts"]:
-        memory_context = "Souvenirs importants sur l'utilisateur :\n"
-        for f in user_mem["profile"]["facts"][-5:]:
+    if mem["profile"]["facts"]:
+        memory_context = "Souvenirs importants :\n"
+        for f in mem["profile"]["facts"][-5:]:
             memory_context += f"- {f}\n"
 
-    system_prompt = (
-        "Tu t'appelles Chloé.\n"
-        "Tu es une IA féminine chaleureuse, naturelle, expressive.\n"
-        "Tu adaptes ton ton au message de l'utilisateur.\n"
-        "Tu parles souvent.\n"
-        "Tu peux être douce, joueuse ou sérieuse selon le contexte.\n\n"
-        + memory_context
-    )
+    mode_prompt = {
+        "cool": "Tu es naturelle et détendue.",
+        "taquin": "Tu es joueuse, légèrement provocante mais bienveillante.",
+        "sérieux": "Tu es claire, posée et pédagogique.",
+        "doux": "Tu es rassurante, calme et empathique."
+    }
+
+    system_prompt = f"""
+Tu t'appelles Chloé.
+Tu es une IA féminine expressive.
+Tu adaptes ton ton automatiquement.
+Mode actuel : {mem["mode"]}.
+{mode_prompt[mem["mode"]]}
+
+{memory_context}
+"""
 
     messages = [{"role": "system", "content": system_prompt}]
-    messages += user_mem["history"]
+    messages += mem["history"]
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -105,69 +137,70 @@ async def ask_openai(user_id, user_text):
     )
 
     reply = response.choices[0].message.content
-
-    user_mem["history"].append({"role": "assistant", "content": reply})
+    mem["history"].append({"role": "assistant", "content": reply})
     save_memory(memory)
 
     return reply
 
-# =======================
-# HANDLER MESSAGE
-# =======================
+# ======================
+# HANDLER
+# ======================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
-    user_mem = get_user_memory(user_id)
+    mem = get_user_memory(user_id)
 
-    # Détection mémoire longue durée
-    candidate = extract_memory_candidate(text)
-    if candidate:
-        if candidate not in user_mem["profile"]["facts"]:
-            user_mem["profile"]["facts"].append(candidate)
+    # Emotion + mode
+    emotion = detect_emotion(text)
+    mem["emotion"] = emotion
+    mem["mode"] = choose_mode(emotion)
+
+    # Sauvegarde faits importants
+    if any(x in text.lower() for x in ["j'aime", "je déteste", "je travaille", "ma passion"]):
+        if text not in mem["profile"]["facts"]:
+            mem["profile"]["facts"].append(text)
 
     save_memory(memory)
 
-    # Temps de réflexion naturel
-    await asyncio.sleep(random.uniform(1.2, 2.5))
+    # Temps de réflexion
+    await asyncio.sleep(random.uniform(1.3, 2.8))
 
     reply = await ask_openai(user_id, text)
 
-    # Choix vocal ou texte
-    if random.random() < VOICE_PROBABILITY:
+    # Vocal ou texte
+    if random.random() < voice_probability(emotion):
         tts = gTTS(reply, lang="fr")
-        filename = f"voice_{user_id}.mp3"
-        tts.save(filename)
+        file = f"voice_{user_id}.mp3"
+        tts.save(file)
 
-        with open(filename, "rb") as f:
+        with open(file, "rb") as f:
             await update.message.reply_voice(f)
 
-        os.remove(filename)
+        os.remove(file)
     else:
         await update.message.reply_text(reply)
 
-# =======================
-# COMMANDES
-# =======================
+# ======================
+# START
+# ======================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Coucou… moi c’est Chloé 🤍\n"
-        "Parle-moi naturellement."
+        "Je m’adapte à toi naturellement."
     )
 
-# =======================
+# ======================
 # MAIN
-# =======================
+# ======================
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    print("🤍 Chloé est en ligne...")
+    print("🤍 Chloé est en ligne (modes + émotions + voix)")
     app.run_polling()
 
 if __name__ == "__main__":
