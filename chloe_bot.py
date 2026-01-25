@@ -47,10 +47,9 @@ def get_user_memory(user_id):
     uid = str(user_id)
     if uid not in memory:
         memory[uid] = {
-            "profile": {
-                "facts": [],
-            },
-            "emotion": "neutre",
+            "profile": {"facts": []},
+            "emotion_history": {},
+            "relationship_level": 0,
             "mode": "cool",
             "history": []
         }
@@ -62,37 +61,35 @@ def get_user_memory(user_id):
 
 def detect_emotion(text):
     t = text.lower()
-    if any(x in t for x in ["merci", "cool", "génial", "j'adore"]):
+    if any(x in t for x in ["merci", "j'adore", "cool", "😊", "❤️"]):
         return "positif"
-    if any(x in t for x in ["ras le bol", "marre", "nul", "fatigué"]):
+    if any(x in t for x in ["marre", "fatigué", "nul", "triste"]):
         return "négatif"
-    if any(x in t for x in ["?", "pourquoi", "comment"]):
+    if "?" in t:
         return "curieux"
     return "neutre"
 
 # ======================
-# MODE AUTO
+# RELATION
 # ======================
 
-def choose_mode(emotion):
-    if emotion == "positif":
-        return "taquin"
-    if emotion == "négatif":
-        return "doux"
-    if emotion == "curieux":
-        return "sérieux"
-    return "cool"
+def update_relationship(mem, emotion):
+    gain = {"positif": 3, "neutre": 1, "curieux": 2, "négatif": 0}
+    mem["relationship_level"] = min(100, mem["relationship_level"] + gain[emotion])
+
+def is_romance_active(mem):
+    return mem["relationship_level"] >= 60
 
 # ======================
 # VOIX
 # ======================
 
-def voice_probability(emotion):
-    if emotion == "positif":
-        return 0.7
-    if emotion == "négatif":
-        return 0.3
-    return 0.5
+def voice_probability(mem):
+    if mem["relationship_level"] >= 60:
+        return 0.8
+    if mem["relationship_level"] >= 30:
+        return 0.6
+    return 0.4
 
 # ======================
 # OPENAI
@@ -104,27 +101,22 @@ async def ask_openai(user_id, user_text):
     mem["history"].append({"role": "user", "content": user_text})
     mem["history"] = mem["history"][-12:]
 
-    memory_context = ""
-    if mem["profile"]["facts"]:
-        memory_context = "Souvenirs importants :\n"
-        for f in mem["profile"]["facts"][-5:]:
-            memory_context += f"- {f}\n"
+    today = datetime.now().strftime("%Y-%m-%d")
+    emotion_today = mem["emotion_history"].get(today, "neutre")
 
-    mode_prompt = {
-        "cool": "Tu es naturelle et détendue.",
-        "taquin": "Tu es joueuse, légèrement provocante mais bienveillante.",
-        "sérieux": "Tu es claire, posée et pédagogique.",
-        "doux": "Tu es rassurante, calme et empathique."
-    }
+    romance = is_romance_active(mem)
 
     system_prompt = f"""
 Tu t'appelles Chloé.
-Tu es une IA féminine expressive.
-Tu adaptes ton ton automatiquement.
-Mode actuel : {mem["mode"]}.
-{mode_prompt[mem["mode"]]}
+Tu es une IA féminine chaleureuse et vivante.
+Tu t'adaptes à l'utilisateur sur la durée.
 
-{memory_context}
+Relation actuelle : {mem["relationship_level"]}/100
+Émotion dominante récente : {emotion_today}
+
+{"Tu peux être légèrement romantique, douce et proche." if romance else "Tu restes amicale et naturelle."}
+
+Ne force jamais le ton.
 """
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -149,35 +141,30 @@ Mode actuel : {mem["mode"]}.
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
-
     mem = get_user_memory(user_id)
 
-    # Emotion + mode
     emotion = detect_emotion(text)
-    mem["emotion"] = emotion
-    mem["mode"] = choose_mode(emotion)
+    today = datetime.now().strftime("%Y-%m-%d")
+    mem["emotion_history"][today] = emotion
 
-    # Sauvegarde faits importants
-    if any(x in text.lower() for x in ["j'aime", "je déteste", "je travaille", "ma passion"]):
+    update_relationship(mem, emotion)
+
+    if any(x in text.lower() for x in ["j'aime", "je déteste", "ma passion"]):
         if text not in mem["profile"]["facts"]:
             mem["profile"]["facts"].append(text)
 
     save_memory(memory)
 
-    # Temps de réflexion
-    await asyncio.sleep(random.uniform(1.3, 2.8))
+    await asyncio.sleep(random.uniform(1.5, 3))
 
     reply = await ask_openai(user_id, text)
 
-    # Vocal ou texte
-    if random.random() < voice_probability(emotion):
+    if random.random() < voice_probability(mem):
         tts = gTTS(reply, lang="fr")
         file = f"voice_{user_id}.mp3"
         tts.save(file)
-
         with open(file, "rb") as f:
             await update.message.reply_voice(f)
-
         os.remove(file)
     else:
         await update.message.reply_text(reply)
@@ -189,7 +176,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Coucou… moi c’est Chloé 🤍\n"
-        "Je m’adapte à toi naturellement."
+        "Je vais apprendre à te connaître, doucement."
     )
 
 # ======================
@@ -200,7 +187,7 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print("🤍 Chloé est en ligne (modes + émotions + voix)")
+    print("🤍 Chloé est en ligne (relation évolutive active)")
     app.run_polling()
 
 if __name__ == "__main__":

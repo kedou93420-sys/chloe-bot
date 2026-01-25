@@ -1,1 +1,13 @@
-{}
+{
+  "123456789": {
+    "profile": {
+      "facts": []
+    },
+    "emotion_history": {
+      "2026-01-22": "positif"
+    },
+    "relationship_level": 18,
+    "mode": "cool",
+    "history": []
+  }
+}
