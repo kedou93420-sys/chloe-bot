@@ -1,13 +1,13 @@
 {
   "123456789": {
     "profile": {
-      "facts": []
+      "facts": [],
+      "shared_memories": []
     },
-    "emotion_history": {
-      "2026-01-22": "positif"
-    },
-    "relationship_level": 18,
-    "mode": "cool",
+    "emotion_history": {},
+    "relationship_level": 42,
+    "last_seen": "2026-01-22T21:30:00",
     "history": []
   }
 }
+
