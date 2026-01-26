@@ -8,6 +8,16 @@
     "relationship_level": 42,
     "last_seen": "2026-01-22T21:30:00",
     "history": []
+	"relationship": {
+		"level": 72,
+		"last_initiative": null,
+		"dominant_emotion": "positif"
+	},
+	"stats": {
+		"messages": 143,
+		"voice_messages": 61
+	}
+
   }
 }
 
